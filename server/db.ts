@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, and, gte, lte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, jobs, skills, bookmarks, Job, Skill, Bookmark, InsertJob, InsertSkill, InsertBookmark } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,290 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// ============ JOBS QUERIES ============
+
+/**
+ * Get all jobs for a user filtered by experience level (1-3 years).
+ * Automatically filters to show only jobs matching 1-3 years experience.
+ */
+export async function getUserJobs(userId: number): Promise<Job[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const result = await db
+    .select()
+    .from(jobs)
+    .where(
+      and(
+        eq(jobs.userId, userId),
+        // Filter for jobs requiring 1-3 years of experience
+        lte(jobs.experienceYearsMin, 3),
+        gte(jobs.experienceYearsMax, 1)
+      )
+    );
+
+  return result;
+}
+
+/**
+ * Get a single job by ID (verify ownership).
+ */
+export async function getJobById(jobId: number, userId: number): Promise<Job | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.id, jobId), eq(jobs.userId, userId)))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : undefined;
+}
+
+/**
+ * Create a new job for a user.
+ */
+export async function createJob(userId: number, jobData: Omit<InsertJob, 'userId'>): Promise<Job> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(jobs).values({
+    ...jobData,
+    userId,
+  });
+
+  const jobId = result[0].insertId;
+  const newJob = await getJobById(jobId as number, userId);
+  if (!newJob) throw new Error("Failed to create job");
+  return newJob;
+}
+
+/**
+ * Update an existing job (verify ownership).
+ */
+export async function updateJob(
+  jobId: number,
+  userId: number,
+  jobData: Partial<Omit<Job, 'id' | 'userId' | 'createdAt'>>
+): Promise<Job | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  await db
+    .update(jobs)
+    .set(jobData)
+    .where(and(eq(jobs.id, jobId), eq(jobs.userId, userId)));
+
+  return getJobById(jobId, userId);
+}
+
+/**
+ * Delete a job (verify ownership).
+ */
+export async function deleteJob(jobId: number, userId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db
+    .delete(jobs)
+    .where(and(eq(jobs.id, jobId), eq(jobs.userId, userId)));
+
+  return (result[0].affectedRows ?? 0) > 0;
+}
+
+// ============ SKILLS QUERIES ============
+
+/**
+ * Get all skills for a user.
+ */
+export async function getUserSkills(userId: number): Promise<Skill[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const result = await db
+    .select()
+    .from(skills)
+    .where(eq(skills.userId, userId));
+
+  return result;
+}
+
+/**
+ * Get a single skill by ID (verify ownership).
+ */
+export async function getSkillById(skillId: number, userId: number): Promise<Skill | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db
+    .select()
+    .from(skills)
+    .where(and(eq(skills.id, skillId), eq(skills.userId, userId)))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : undefined;
+}
+
+/**
+ * Create a new skill for a user.
+ */
+export async function createSkill(userId: number, skillData: Omit<InsertSkill, 'userId'>): Promise<Skill> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(skills).values({
+    ...skillData,
+    userId,
+  });
+
+  const skillId = result[0].insertId;
+  const newSkill = await getSkillById(skillId as number, userId);
+  if (!newSkill) throw new Error("Failed to create skill");
+  return newSkill;
+}
+
+/**
+ * Update an existing skill (verify ownership).
+ */
+export async function updateSkill(
+  skillId: number,
+  userId: number,
+  skillData: Partial<Omit<Skill, 'id' | 'userId' | 'createdAt'>>
+): Promise<Skill | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  await db
+    .update(skills)
+    .set(skillData)
+    .where(and(eq(skills.id, skillId), eq(skills.userId, userId)));
+
+  return getSkillById(skillId, userId);
+}
+
+/**
+ * Delete a skill (verify ownership).
+ */
+export async function deleteSkill(skillId: number, userId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db
+    .delete(skills)
+    .where(and(eq(skills.id, skillId), eq(skills.userId, userId)));
+
+  return (result[0].affectedRows ?? 0) > 0;
+}
+
+// ============ BOOKMARKS QUERIES ============
+
+/**
+ * Get all bookmarks for a user (with job details).
+ */
+export async function getUserBookmarks(userId: number): Promise<(Bookmark & { job?: Job })[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const bookmarkResults = await db
+    .select()
+    .from(bookmarks)
+    .where(eq(bookmarks.userId, userId));
+
+  // Fetch job details for each bookmark
+  const bookmarksWithJobs = await Promise.all(
+    bookmarkResults.map(async (bookmark) => {
+      const job = await getJobById(bookmark.jobId, userId);
+      return { ...bookmark, job };
+    })
+  );
+
+  return bookmarksWithJobs;
+}
+
+/**
+ * Check if a job is bookmarked by a user.
+ */
+export async function isJobBookmarked(jobId: number, userId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db
+    .select()
+    .from(bookmarks)
+    .where(and(eq(bookmarks.jobId, jobId), eq(bookmarks.userId, userId)))
+    .limit(1);
+
+  return result.length > 0;
+}
+
+/**
+ * Add a bookmark for a job.
+ */
+export async function addBookmark(
+  jobId: number,
+  userId: number,
+  notes?: string
+): Promise<Bookmark> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  // Check if already bookmarked
+  const existing = await isJobBookmarked(jobId, userId);
+  if (existing) throw new Error("Job already bookmarked");
+
+  const result = await db.insert(bookmarks).values({
+    jobId,
+    userId,
+    notes,
+  });
+
+  const bookmarkId = result[0].insertId;
+  const newBookmark = await db
+    .select()
+    .from(bookmarks)
+    .where(eq(bookmarks.id, bookmarkId as number))
+    .limit(1);
+
+  if (newBookmark.length === 0) throw new Error("Failed to create bookmark");
+  return newBookmark[0];
+}
+
+/**
+ * Remove a bookmark.
+ */
+export async function removeBookmark(jobId: number, userId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+
+  const result = await db
+    .delete(bookmarks)
+    .where(and(eq(bookmarks.jobId, jobId), eq(bookmarks.userId, userId)));
+
+  return (result[0].affectedRows ?? 0) > 0;
+}
+
+/**
+ * Update bookmark notes.
+ */
+export async function updateBookmarkNotes(
+  jobId: number,
+  userId: number,
+  notes: string | null
+): Promise<Bookmark | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  await db
+    .update(bookmarks)
+    .set({ notes })
+    .where(and(eq(bookmarks.jobId, jobId), eq(bookmarks.userId, userId)));
+
+  const result = await db
+    .select()
+    .from(bookmarks)
+    .where(and(eq(bookmarks.jobId, jobId), eq(bookmarks.userId, userId)))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : undefined;
+}
