@@ -5,6 +5,10 @@ import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import * as db from "./db";
 import { TRPCError } from "@trpc/server";
+import { parse as parseCookie } from "cookie";
+import { createHeartbeatJob } from "./_core/heartbeat";
+import { eq } from "drizzle-orm";
+import { scheduledMessages } from "../drizzle/schema";
 
 export const appRouter = router({
   system: systemRouter,
@@ -174,6 +178,81 @@ export const appRouter = router({
       )
       .mutation(({ ctx, input }) =>
         db.updateBookmarkNotes(input.jobId, ctx.user.id, input.notes)
+      ),
+  }),
+
+  messages: router({
+    list: protectedProcedure.query(({ ctx }) =>
+      db.getUserMessages(ctx.user.id)
+    ),
+    create: protectedProcedure
+      .input(
+        z.object({
+          title: z.string().min(1),
+          description: z.string().optional(),
+          reportDate: z.date(),
+          messageContent: z.string().min(1),
+        })
+      )
+      .mutation(({ ctx, input }) =>
+        db.createScheduledMessage(ctx.user.id, input)
+      ),
+    updateStatus: protectedProcedure
+      .input(
+        z.object({
+          messageId: z.number(),
+          status: z.enum(["pending", "sent", "archived"]),
+        })
+      )
+      .mutation(({ ctx, input }) =>
+        db.updateMessageStatus(input.messageId, ctx.user.id, input.status)
+      ),
+    scheduleDaily: protectedProcedure
+      .input(
+        z.object({
+          messageId: z.number(),
+          cron: z.string().min(1),
+          description: z.string().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        const sessionToken = parseCookie(ctx.req.headers.cookie ?? "")[COOKIE_NAME] ?? "";
+        const job = await createHeartbeatJob({
+          name: `job-msg-${input.messageId}-${Date.now()}`,
+          cron: input.cron,
+          path: "/api/scheduled/deliverJobs",
+          payload: {},
+          description: input.description || `Daily job message delivery`,
+        }, sessionToken);
+        
+        // Persist the taskUid to the database for later lookup
+        const dbInstance = await db.getDb();
+        if (dbInstance) {
+          await dbInstance
+            .update(scheduledMessages)
+            .set({ scheduleCronTaskUid: job.taskUid })
+            .where(eq(scheduledMessages.id, input.messageId));
+        }
+        
+        return { taskUid: job.taskUid, nextExecutionAt: job.nextExecutionAt };
+      }),
+  }),
+
+  imports: router({
+    list: protectedProcedure.query(({ ctx }) =>
+      db.getUserJobImports(ctx.user.id)
+    ),
+    create: protectedProcedure
+      .input(
+        z.object({
+          messageId: z.number(),
+          jobId: z.number(),
+          matchScore: z.string().optional(),
+          tier: z.string().optional(),
+        })
+      )
+      .mutation(({ ctx, input }) =>
+        db.createJobImport(ctx.user.id, input)
       ),
   }),
 });

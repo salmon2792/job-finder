@@ -8,6 +8,7 @@ import DashboardLayout from "./components/DashboardLayout";
 import JobsPage from "./pages/JobsPage";
 import SkillsPage from "./pages/SkillsPage";
 import BookmarksPage from "./pages/BookmarksPage";
+import MessagesPage from "./pages/MessagesPage";
 
 function Router() {
   return (
@@ -25,6 +26,11 @@ function Router() {
       <Route path={"/bookmarks"}>
         <DashboardLayout>
           <BookmarksPage />
+        </DashboardLayout>
+      </Route>
+      <Route path={"/messages"}>
+        <DashboardLayout>
+          <MessagesPage />
         </DashboardLayout>
       </Route>
       <Route path={"/404"} component={NotFound} />

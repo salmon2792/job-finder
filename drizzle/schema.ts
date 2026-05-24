@@ -82,12 +82,51 @@ export type Bookmark = typeof bookmarks.$inferSelect;
 export type InsertBookmark = typeof bookmarks.$inferInsert;
 
 /**
+ * Scheduled messages table stores daily job reports/messages.
+ * Each message is associated with a user and contains job listings.
+ */
+export const scheduledMessages = mysqlTable("scheduledMessages", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  reportDate: timestamp("reportDate").notNull(),
+  messageContent: text("messageContent").notNull(),
+  status: mysqlEnum("status", ["pending", "sent", "archived"]).default("pending").notNull(),
+  scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  sentAt: timestamp("sentAt"),
+});
+
+export type ScheduledMessage = typeof scheduledMessages.$inferSelect;
+export type InsertScheduledMessage = typeof scheduledMessages.$inferInsert;
+
+/**
+ * Job imports table tracks which jobs were imported from which messages.
+ * Allows users to see the source of each job and bulk import from messages.
+ */
+export const jobImports = mysqlTable("jobImports", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  messageId: int("messageId").notNull(),
+  jobId: int("jobId").notNull(),
+  matchScore: varchar("matchScore", { length: 50 }),
+  tier: varchar("tier", { length: 50 }),
+  importedAt: timestamp("importedAt").defaultNow().notNull(),
+});
+
+export type JobImport = typeof jobImports.$inferSelect;
+export type InsertJobImport = typeof jobImports.$inferInsert;
+
+/**
  * Relations for Drizzle ORM
  */
 export const usersRelations = relations(users, ({ many }) => ({
   jobs: many(jobs),
   skills: many(skills),
   bookmarks: many(bookmarks),
+  scheduledMessages: many(scheduledMessages),
+  jobImports: many(jobImports),
 }));
 
 export const jobsRelations = relations(jobs, ({ one, many }) => ({
@@ -96,6 +135,7 @@ export const jobsRelations = relations(jobs, ({ one, many }) => ({
     references: [users.id],
   }),
   bookmarks: many(bookmarks),
+  jobImports: many(jobImports),
 }));
 
 export const skillsRelations = relations(skills, ({ one }) => ({
@@ -112,6 +152,29 @@ export const bookmarksRelations = relations(bookmarks, ({ one }) => ({
   }),
   job: one(jobs, {
     fields: [bookmarks.jobId],
+    references: [jobs.id],
+  }),
+}));
+
+export const scheduledMessagesRelations = relations(scheduledMessages, ({ one, many }) => ({
+  user: one(users, {
+    fields: [scheduledMessages.userId],
+    references: [users.id],
+  }),
+  jobImports: many(jobImports),
+}));
+
+export const jobImportsRelations = relations(jobImports, ({ one }) => ({
+  user: one(users, {
+    fields: [jobImports.userId],
+    references: [users.id],
+  }),
+  message: one(scheduledMessages, {
+    fields: [jobImports.messageId],
+    references: [scheduledMessages.id],
+  }),
+  job: one(jobs, {
+    fields: [jobImports.jobId],
     references: [jobs.id],
   }),
 }));

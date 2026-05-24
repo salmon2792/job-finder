@@ -15,6 +15,20 @@
       "when": 1779474745943,
       "tag": "0001_familiar_frank_castle",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1779556884944,
+      "tag": "0002_stiff_white_queen",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "5",
+      "when": 1779556990227,
+      "tag": "0003_fancy_blink",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,3 @@
-import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
@@ -44,6 +43,55 @@ async function startServer() {
       createContext,
     })
   );
+
+  // Scheduled job delivery handler
+  app.post("/api/scheduled/deliverJobs", async (req, res) => {
+    try {
+      const { sdk } = await import("./sdk");
+      const user = await sdk.authenticateRequest(req);
+      
+      if (!user.isCron || !user.taskUid) {
+        return res.status(403).json({ error: "cron-only" });
+      }
+
+      const { getDb } = await import("../db");
+      const { eq } = await import("drizzle-orm");
+      const { scheduledMessages } = await import("../../drizzle/schema");
+      
+      const db = await getDb();
+      if (!db) {
+        return res.status(503).json({ error: "database unavailable" });
+      }
+
+      // Look up the message by taskUid (never by req.body)
+      const message = (await db
+        .select()
+        .from(scheduledMessages)
+        .where(eq(scheduledMessages.scheduleCronTaskUid, user.taskUid))
+        .limit(1))[0];
+
+      if (!message) {
+        return res.json({ ok: true, skipped: "orphan" });
+      }
+
+      // Update message status to sent
+      await db
+        .update(scheduledMessages)
+        .set({ status: "sent", sentAt: new Date() })
+        .where(eq(scheduledMessages.id, message.id));
+      
+      res.json({ ok: true, messageId: message.id, status: "sent" });
+    } catch (error) {
+      console.error("[Scheduled Job Delivery] Error:", error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
+        context: { url: req.url, taskUid: (req as any).user?.taskUid },
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);

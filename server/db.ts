@@ -1,7 +1,8 @@
-import { eq, and, gte, lte } from "drizzle-orm";
+import { eq, and, gte, lte, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, jobs, skills, bookmarks, Job, Skill, Bookmark, InsertJob, InsertSkill, InsertBookmark } from "../drizzle/schema";
+import { InsertUser, users, jobs, skills, bookmarks, scheduledMessages, jobImports, Job, Skill, Bookmark, ScheduledMessage, JobImport, InsertJob, InsertSkill, InsertBookmark, InsertScheduledMessage, InsertJobImport } from "../drizzle/schema";
 import { ENV } from './_core/env';
+
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -375,4 +376,125 @@ export async function updateBookmarkNotes(
     .limit(1);
 
   return result.length > 0 ? result[0] : undefined;
+}
+
+// ============ SCHEDULED MESSAGES QUERIES ============
+
+/**
+ * Get all scheduled messages for a user.
+ */
+export async function getUserMessages(userId: number): Promise<ScheduledMessage[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const result = await db
+    .select()
+    .from(scheduledMessages)
+    .where(eq(scheduledMessages.userId, userId))
+    .orderBy(desc(scheduledMessages.reportDate));
+
+  return result;
+}
+
+/**
+ * Create a new scheduled message for a user.
+ */
+export async function createScheduledMessage(
+  userId: number,
+  messageData: Omit<InsertScheduledMessage, 'userId'>
+): Promise<ScheduledMessage> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(scheduledMessages).values({
+    ...messageData,
+    userId,
+  });
+
+  const messageId = result[0].insertId;
+  const newMessage = await db
+    .select()
+    .from(scheduledMessages)
+    .where(eq(scheduledMessages.id, messageId as number))
+    .limit(1);
+
+  if (newMessage.length === 0) throw new Error("Failed to create message");
+  return newMessage[0];
+}
+
+/**
+ * Update message status.
+ */
+export async function updateMessageStatus(
+  messageId: number,
+  userId: number,
+  status: 'pending' | 'sent' | 'archived'
+): Promise<ScheduledMessage | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  await db
+    .update(scheduledMessages)
+    .set({ status, sentAt: status === 'sent' ? new Date() : undefined })
+    .where(and(eq(scheduledMessages.id, messageId), eq(scheduledMessages.userId, userId)));
+
+  const result = await db
+    .select()
+    .from(scheduledMessages)
+    .where(and(eq(scheduledMessages.id, messageId), eq(scheduledMessages.userId, userId)))
+    .limit(1);
+
+  return result.length > 0 ? result[0] : undefined;
+}
+
+// ============ JOB IMPORTS QUERIES ============
+
+/**
+ * Get all job imports for a user.
+ */
+export async function getUserJobImports(userId: number): Promise<(JobImport & { job?: Job })[]> {
+  const db = await getDb();
+  if (!db) return [];
+
+  const importResults = await db
+    .select()
+    .from(jobImports)
+    .where(eq(jobImports.userId, userId))
+    .orderBy(desc(jobImports.importedAt));
+
+  // Fetch job details for each import
+  const importsWithJobs = await Promise.all(
+    importResults.map(async (imp) => {
+      const job = await getJobById(imp.jobId, userId);
+      return { ...imp, job };
+    })
+  );
+
+  return importsWithJobs;
+}
+
+/**
+ * Create a job import record.
+ */
+export async function createJobImport(
+  userId: number,
+  importData: Omit<InsertJobImport, 'userId'>
+): Promise<JobImport> {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+
+  const result = await db.insert(jobImports).values({
+    ...importData,
+    userId,
+  });
+
+  const importId = result[0].insertId;
+  const newImport = await db
+    .select()
+    .from(jobImports)
+    .where(eq(jobImports.id, importId as number))
+    .limit(1);
+
+  if (newImport.length === 0) throw new Error("Failed to create import");
+  return newImport[0];
 }

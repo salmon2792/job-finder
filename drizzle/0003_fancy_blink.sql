@@ -1,0 +1,1 @@
+ALTER TABLE `scheduledMessages` ADD `scheduleCronTaskUid` varchar(65);
